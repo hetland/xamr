@@ -1,33 +1,110 @@
 """
 Core classes for xamr package
+
+This package provides an xarray-like interface for AMReX data via yt, supporting:
+- Native AMR structure access
+- Time series data from multiple files
+- Indexing at the coarsest refinement level
+- Spatial and temporal selection methods
 """
 
 import yt
 import numpy as np
 from typing import Union, Dict, Any, Optional, List
+import glob
+import os
+from pathlib import Path
 
 
 class AMReXDataset:
-    """xarray-like interface for AMReX data via yt (native AMR)"""
+    """xarray-like interface for AMReX data via yt (native AMR)
     
-    def __init__(self, filename: str):
-        self._yt_ds = yt.load(filename)
+    Supports both single files and time series from multiple files.
+    Indexing operations work on the coarsest refinement level (level 0).
+    
+    Examples:
+        # Single file
+        ds = AMReXDataset("plt00000")
         
-        # Work with native AMR structure - no level selection by default
-        self._all_data = self._yt_ds.all_data()
+        # Time series from multiple files
+        ds = AMReXDataset(["plt00000", "plt00001", "plt00002"])
+        ds = AMReXDataset("plt*")  # glob pattern
         
-        # Build coordinate and level information
+        # Access field data
+        temp = ds['temperature']
+        
+        # Indexing (coarsest level)
+        temp_point = ds['temperature'][0, 10, 20]  # time=0, z=10, y=20 (for 3D)
+        temp_slice = ds['temperature'][0, :, :, 50]  # time=0, all z,y, x=50
+    """
+    
+    def __init__(self, filename: Union[str, List[str]]):
+        self._setup_time_series(filename)
         self._build_coordinates()
         self._build_data_vars()
+    
+    def _setup_time_series(self, filename: Union[str, List[str]]):
+        """Setup time series data from single file or multiple files"""
+        if isinstance(filename, str):
+            # Check if it's a glob pattern
+            if '*' in filename or '?' in filename:
+                files = sorted(glob.glob(filename))
+                if not files:
+                    raise FileNotFoundError(f"No files found matching pattern: {filename}")
+            else:
+                files = [filename]
+        else:
+            files = filename
+        
+        self._files = files
+        self._yt_datasets = []
+        self._times = []
+        
+        # Load all datasets and extract times
+        for file in files:
+            yt_ds = yt.load(file)
+            self._yt_datasets.append(yt_ds)
+            self._times.append(float(yt_ds.current_time))
+        
+        # Sort by time
+        sorted_indices = np.argsort(self._times)
+        self._yt_datasets = [self._yt_datasets[i] for i in sorted_indices]
+        self._times = [self._times[i] for i in sorted_indices]
+        self._files = [self._files[i] for i in sorted_indices]
+        
+        # Use first dataset for structure info
+        self._yt_ds = self._yt_datasets[0]
+        self._all_data = [ds.all_data() for ds in self._yt_datasets]
+        
+        # Get grid dimensions at coarsest level for indexing
+        self._setup_coarsest_grid()
+    
+    def _setup_coarsest_grid(self):
+        """Setup uniform grid at coarsest level for indexing"""
+        self._coarsest_grids = []
+        
+        for yt_ds in self._yt_datasets:
+            # Create covering grid at level 0 (coarsest)
+            coarsest_grid = yt_ds.covering_grid(
+                level=0,
+                left_edge=yt_ds.domain_left_edge,
+                dims=yt_ds.domain_dimensions
+            )
+            self._coarsest_grids.append(coarsest_grid)
     
     def _build_coordinates(self):
         """Build coordinate mappings for AMR structure"""
         self.coords = {}
         self.dims = []
         
+        # Time dimension (if multiple files)
+        if len(self._times) > 1:
+            self.dims.append('time')
+            self.coords['time'] = np.array(self._times)
+        
         # Spatial coordinates - these will be non-uniform due to AMR
         coord_names = ['x', 'y', 'z'][:self._yt_ds.dimensionality]
-        self.dims = coord_names[::-1]  # z, y, x for 3D
+        self.dims.extend(coord_names[::-1])  # z, y, x for 3D (or y, x for 2D)
         
         # Get coordinate ranges (domain bounds)
         for dim in coord_names:
@@ -36,9 +113,13 @@ class AMReXDataset:
                 float(self._yt_ds.domain_right_edge[coord_names.index(dim)])
             )
         
+        # Coordinate arrays at coarsest level
+        coarsest_grid = self._coarsest_grids[0]
+        for i, dim in enumerate(coord_names):
+            self.coords[dim] = np.array(coarsest_grid[('index', dim)])
+        
         # AMR level information
         self.coords['levels'] = list(range(self._yt_ds.max_level + 1))
-        self.coords['time'] = float(self._yt_ds.current_time)
         
     def _build_data_vars(self):
         """Identify available data variables"""
@@ -64,10 +145,11 @@ class AMReXDataset:
         return {
             'max_level': self._yt_ds.max_level,
             'dimensionality': self._yt_ds.dimensionality,
-            'current_time': float(self._yt_ds.current_time),
+            'times': self._times,
+            'n_timesteps': len(self._times),
             'domain_left_edge': self._yt_ds.domain_left_edge.v,
             'domain_right_edge': self._yt_ds.domain_right_edge.v,
-            'domain_dimensions': self._yt_ds.domain_dimensions.v,
+            'domain_dimensions': self._yt_ds.domain_dimensions,
             'parameters': dict(self._yt_ds.parameters)
         }
     
@@ -83,7 +165,23 @@ class AMReXDataset:
 
 
 class AMReXDataArray:
-    """xarray-like DataArray for AMR fields"""
+    """xarray-like DataArray for AMR fields
+    
+    Supports indexing at the coarsest refinement level with time as the leftmost index.
+    
+    Indexing examples:
+        # Single time step
+        data[10, 20]        # z=10, y=20 (for 2D)
+        data[10, 20, 30]    # z=10, y=20, x=30 (for 3D)
+        
+        # Time series
+        data[0, 10, 20]     # time=0, z=10, y=20 (for 2D)
+        data[0, 10, 20, 30] # time=0, z=10, y=20, x=30 (for 3D)
+        
+        # Slicing
+        data[0, :, :]       # time=0, all z,y (for 2D)
+        data[:, 10, :]      # all times, z=10, all y (for 2D)
+    """
     
     def __init__(self, parent_ds: AMReXDataset, field_name: str, selection_obj=None):
         self.parent = parent_ds
@@ -91,7 +189,74 @@ class AMReXDataArray:
         self._field_tuple = parent_ds.data_vars[field_name]
         self._selection_obj = selection_obj or parent_ds._all_data
         self._data = None  # Lazy loading
+        self._coarsest_data = None  # Cached coarsest level data
     
+    def __getitem__(self, key):
+        """Index into the coarsest level data
+        
+        Args:
+            key: Index or slice. For time series, time index is leftmost.
+                 Spatial indices follow yt convention (z, y, x for 3D).
+        
+        Returns:
+            Scalar value or numpy array depending on indexing
+        """
+        # Ensure we have coarsest level data loaded
+        if self._coarsest_data is None:
+            self._load_coarsest_data()
+        
+        # Handle different indexing patterns
+        if not isinstance(key, tuple):
+            key = (key,)
+        
+        # Determine if we have time dimension
+        has_time = len(self.parent._times) > 1
+        n_spatial_dims = self.parent._yt_ds.dimensionality
+        
+        if has_time:
+            # Time series: time index is first
+            expected_dims = 1 + n_spatial_dims  # time + spatial
+            if len(key) > expected_dims:
+                raise IndexError(f"Too many indices. Expected at most {expected_dims}, got {len(key)}")
+            
+            # Extract time index
+            time_idx = key[0] if len(key) > 0 else slice(None)
+            spatial_key = key[1:] if len(key) > 1 else ()
+            
+            # Handle time indexing
+            if isinstance(time_idx, slice):
+                # Time slice
+                time_start, time_stop, time_step = time_idx.indices(len(self._coarsest_data))
+                result_data = []
+                
+                for t in range(time_start, time_stop, time_step):
+                    if spatial_key:
+                        result_data.append(self._coarsest_data[t][spatial_key])
+                    else:
+                        result_data.append(self._coarsest_data[t])
+                
+                return np.array(result_data)
+            else:
+                # Single time index
+                if spatial_key:
+                    return self._coarsest_data[time_idx][spatial_key]
+                else:
+                    return self._coarsest_data[time_idx]
+        else:
+            # Single time step
+            if len(key) > n_spatial_dims:
+                raise IndexError(f"Too many indices. Expected at most {n_spatial_dims}, got {len(key)}")
+            
+            return self._coarsest_data[0][key]
+    
+    def _load_coarsest_data(self):
+        """Load data at coarsest level for all time steps"""
+        self._coarsest_data = []
+        
+        for coarsest_grid in self.parent._coarsest_grids:
+            field_data = np.array(coarsest_grid[self._field_tuple])
+            self._coarsest_data.append(field_data)
+
     @property
     def data(self):
         """Lazy load AMR data - returns yt YTArray"""
@@ -111,6 +276,19 @@ class AMReXDataArray:
     @property
     def dims(self):
         return self.parent.dims
+    
+    @property
+    def shape(self):
+        """Shape of the data at coarsest level"""
+        if self._coarsest_data is None:
+            self._load_coarsest_data()
+        
+        if len(self.parent._times) > 1:
+            # Time series shape
+            return (len(self._coarsest_data),) + self._coarsest_data[0].shape
+        else:
+            # Single time step shape
+            return self._coarsest_data[0].shape
     
     def level_select(self, level: Union[int, List[int]]) -> 'AMReXDataArray':
         """Select specific AMR level(s)"""
@@ -178,7 +356,8 @@ class AMReXDataArray:
                   Must be between 0 and max_level.
         
         Returns:
-            numpy.ndarray: Field values at the specified level
+            numpy.ndarray: Field values at the specified level. For time series data,
+                          returns array with time as first dimension.
         
         Raises:
             ValueError: If level is out of range
@@ -189,17 +368,32 @@ class AMReXDataArray:
         if level < 0 or level > self.parent._yt_ds.max_level:
             raise ValueError(f"Level {level} is out of range. Must be between 0 and {self.parent._yt_ds.max_level}")
         
-        # Get data at specific level
-        level_data = self.parent._yt_ds.covering_grid(
-            level=level,
-            left_edge=self.parent._yt_ds.domain_left_edge,
-            dims=self.parent._yt_ds.domain_dimensions * self.parent._yt_ds.refine_by**level
-        )
-        
-        # Extract field values and convert to numpy array
-        field_values = level_data[self._field_tuple]
-        return np.array(field_values)
-    
+        if level == 0:
+            # Use cached coarsest data
+            if self._coarsest_data is None:
+                self._load_coarsest_data()
+            
+            if len(self.parent._times) > 1:
+                return np.array(self._coarsest_data)
+            else:
+                return self._coarsest_data[0]
+        else:
+            # Extract data at specified level for all time steps
+            result = []
+            for yt_ds in self.parent._yt_datasets:
+                level_data = yt_ds.covering_grid(
+                    level=level,
+                    left_edge=yt_ds.domain_left_edge,
+                    dims=yt_ds.domain_dimensions * yt_ds.refine_by**level
+                )
+                field_values = level_data[self._field_tuple]
+                result.append(np.array(field_values))
+            
+            if len(self.parent._times) > 1:
+                return np.array(result)
+            else:
+                return result[0]
+
 
 class AMReXCalculations:
     """Atmospheric/oceanic calculations using yt's AMR-native operations"""
