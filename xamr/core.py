@@ -169,7 +169,37 @@ class AMReXDataArray:
     def mean(self, **kwargs):
         """Volume-weighted mean across AMR structure"""
         return float(self.data.mean())
-
+    
+    def values(self, level: Optional[int] = None) -> np.ndarray:
+        """Get values as numpy array for a specific refinement level
+        
+        Args:
+            level: AMR level to extract values from. If None, uses coarsest level (level 0).
+                  Must be between 0 and max_level.
+        
+        Returns:
+            numpy.ndarray: Field values at the specified level
+        
+        Raises:
+            ValueError: If level is out of range
+        """
+        if level is None:
+            level = 0  # Default to coarsest level
+        
+        if level < 0 or level > self.parent._yt_ds.max_level:
+            raise ValueError(f"Level {level} is out of range. Must be between 0 and {self.parent._yt_ds.max_level}")
+        
+        # Get data at specific level
+        level_data = self.parent._yt_ds.covering_grid(
+            level=level,
+            left_edge=self.parent._yt_ds.domain_left_edge,
+            dims=self.parent._yt_ds.domain_dimensions * self.parent._yt_ds.refine_by**level
+        )
+        
+        # Extract field values and convert to numpy array
+        field_values = level_data[self._field_tuple]
+        return np.array(field_values)
+    
 
 class AMReXCalculations:
     """Atmospheric/oceanic calculations using yt's AMR-native operations"""
