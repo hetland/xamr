@@ -60,28 +60,18 @@ Requirements:
    :caption: User Guide:
 
    user_guide/index
-   user_guide/getting_started
-   user_guide/time_series
-   user_guide/indexing
-   user_guide/calculations
 
 .. toctree::
    :maxdepth: 2
    :caption: API Reference:
 
    api/index
-   api/dataset
-   api/dataarray
-   api/calculations
 
 .. toctree::
    :maxdepth: 1
    :caption: Examples:
 
    examples/index
-   examples/basic_usage
-   examples/time_series_analysis
-   examples/amr_visualization
 
 Indices and tables
 ==================
