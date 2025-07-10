@@ -147,8 +147,8 @@ class AMReXDataset:
             'dimensionality': self._yt_ds.dimensionality,
             'times': self._times,
             'n_timesteps': len(self._times),
-            'domain_left_edge': self._yt_ds.domain_left_edge.v,
-            'domain_right_edge': self._yt_ds.domain_right_edge.v,
+            'domain_left_edge': self._yt_ds.domain_left_edge,
+            'domain_right_edge': self._yt_ds.domain_right_edge,
             'domain_dimensions': self._yt_ds.domain_dimensions,
             'parameters': dict(self._yt_ds.parameters)
         }
@@ -406,77 +406,88 @@ class AMReXCalculations:
         if dim not in ['x', 'y', 'z']:
             raise ValueError(f"Invalid dimension: {dim}")
         
-        grad_field_name = f"gradient_{field}_{dim}"
+        field_tuple = self.ds.data_vars[field]
+        grad_field_name = f"{field}_gradient_{dim}"
+        grad_field_tuple = (field_tuple[0], grad_field_name)
         
-        # Check if this derived field already exists
-        if ('amrex', grad_field_name) not in self.ds._yt_ds.derived_field_list:
-            
-            def _gradient_function(field_obj, data):
-                # yt automatically handles AMR gradients
-                return data[self.ds.data_vars[field]].gradient(dim)
-            
-            self.ds._yt_ds.add_field(
-                ("amrex", grad_field_name),
-                function=_gradient_function,
-                sampling_type="cell",
-                units="auto"
-            )
+        # This will create all gradient fields for the given field
+        # It's idempotent, so it's safe to call multiple times.
+        self.ds._yt_ds.add_gradient_fields(field_tuple)
         
         # Add to data_vars if not already there
         if grad_field_name not in self.ds.data_vars:
-            self.ds.data_vars[grad_field_name] = ("amrex", grad_field_name)
+            self.ds.data_vars[grad_field_name] = grad_field_tuple
         
         return AMReXDataArray(self.ds, grad_field_name)
     
     def divergence(self, u_field: str, v_field: str, w_field: str = None):
         """Calculate divergence across all AMR levels"""
         div_field_name = "divergence"
-        
-        if ('amrex', div_field_name) not in self.ds._yt_ds.derived_field_list:
+        div_field_tuple = ("amrex", div_field_name)
+
+        if div_field_tuple not in self.ds._yt_ds.derived_field_list:
             
-            def _divergence_function(field_obj, data):
-                # yt handles AMR automatically
-                du_dx = data[self.ds.data_vars[u_field]].gradient('x')
-                dv_dy = data[self.ds.data_vars[v_field]].gradient('y')
-                div = du_dx + dv_dy
+            u_field_tuple = self.ds.data_vars[u_field]
+            v_field_tuple = self.ds.data_vars[v_field]
+            
+            # Ensure gradient fields exist
+            self.ds._yt_ds.add_gradient_fields(u_field_tuple)
+            self.ds._yt_ds.add_gradient_fields(v_field_tuple)
+            
+            u_grad_x_tuple = (u_field_tuple[0], f"{u_field}_gradient_x")
+            v_grad_y_tuple = (v_field_tuple[0], f"{v_field}_gradient_y")
+
+            def _divergence_function(field, data):
+                div = data[u_grad_x_tuple] + data[v_grad_y_tuple]
                 
                 if w_field and self.ds._yt_ds.dimensionality == 3:
-                    dw_dz = data[self.ds.data_vars[w_field]].gradient('z')
-                    div += dw_dz
+                    w_field_tuple = self.ds.data_vars[w_field]
+                    self.ds._yt_ds.add_gradient_fields(w_field_tuple)
+                    w_grad_z_tuple = (w_field_tuple[0], f"{w_field}_gradient_z")
+                    div += data[w_grad_z_tuple]
                 
                 return div
             
             self.ds._yt_ds.add_field(
-                ("amrex", div_field_name),
+                div_field_tuple,
                 function=_divergence_function,
                 sampling_type="cell",
-                units="1/code_length"
+                units="auto"
             )
         
         if div_field_name not in self.ds.data_vars:
-            self.ds.data_vars[div_field_name] = ("amrex", div_field_name)
+            self.ds.data_vars[div_field_name] = div_field_tuple
         
         return AMReXDataArray(self.ds, div_field_name)
     
     def vorticity(self, u_field: str, v_field: str):
         """Calculate vertical vorticity across all AMR levels"""
         vort_field_name = "vorticity_z"
+        vort_field_tuple = ("amrex", vort_field_name)
         
-        if ('amrex', vort_field_name) not in self.ds._yt_ds.derived_field_list:
+        if vort_field_tuple not in self.ds._yt_ds.derived_field_list:
             
-            def _vorticity_function(field_obj, data):
-                dv_dx = data[self.ds.data_vars[v_field]].gradient('x')
-                du_dy = data[self.ds.data_vars[u_field]].gradient('y')
-                return dv_dx - du_dy
+            u_field_tuple = self.ds.data_vars[u_field]
+            v_field_tuple = self.ds.data_vars[v_field]
+
+            # Ensure gradient fields exist
+            self.ds._yt_ds.add_gradient_fields(u_field_tuple)
+            self.ds._yt_ds.add_gradient_fields(v_field_tuple)
+
+            u_grad_y_tuple = (u_field_tuple[0], f"{u_field}_gradient_y")
+            v_grad_x_tuple = (v_field_tuple[0], f"{v_field}_gradient_x")
+
+            def _vorticity_function(field, data):
+                return data[v_grad_x_tuple] - data[u_grad_y_tuple]
             
             self.ds._yt_ds.add_field(
-                ("amrex", vort_field_name),
+                vort_field_tuple,
                 function=_vorticity_function,
                 sampling_type="cell",
-                units="1/code_time"
+                units="auto"
             )
         
         if vort_field_name not in self.ds.data_vars:
-            self.ds.data_vars[vort_field_name] = ("amrex", vort_field_name)
+            self.ds.data_vars[vort_field_name] = vort_field_tuple
         
         return AMReXDataArray(self.ds, vort_field_name)

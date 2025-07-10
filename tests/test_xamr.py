@@ -26,21 +26,23 @@ class TestAMReXDataset:
     def setup_method(self):
         """Set up test fixtures"""
         # Create a mock yt dataset
-        self.mock_yt_ds = Mock()
+        self.mock_yt_ds = MagicMock()
         self.mock_yt_ds.dimensionality = 3
         self.mock_yt_ds.max_level = 2
         self.mock_yt_ds.current_time = 1.5
-        self.mock_yt_ds.domain_left_edge = Mock()
-        self.mock_yt_ds.domain_left_edge.__getitem__ = Mock(return_value=0.0)
-        self.mock_yt_ds.domain_right_edge = Mock()
-        self.mock_yt_ds.domain_right_edge.__getitem__ = Mock(return_value=100.0)
-        self.mock_yt_ds.domain_dimensions = Mock()
-        self.mock_yt_ds.domain_dimensions.v = np.array([64, 64, 64])
+        self.mock_yt_ds.domain_left_edge = np.array([0.0, 0.0, 0.0])
+        self.mock_yt_ds.domain_right_edge = np.array([100.0, 100.0, 100.0])
+        self.mock_yt_ds.domain_dimensions = np.array([64, 64, 64])
         self.mock_yt_ds.field_list = [('amrex', 'temperature'), ('amrex', 'density')]
         self.mock_yt_ds.parameters = {'param1': 'value1'}
         
+        # Mock covering_grid
+        self.mock_coarsest_grid = MagicMock()
+        self.mock_coarsest_grid.__getitem__.return_value = np.zeros(64)
+        self.mock_yt_ds.covering_grid.return_value = self.mock_coarsest_grid
+        
         # Mock all_data method
-        self.mock_all_data = Mock()
+        self.mock_all_data = MagicMock()
         self.mock_yt_ds.all_data.return_value = self.mock_all_data
         
         # Mock yt.load
@@ -51,7 +53,7 @@ class TestAMReXDataset:
         ds = AMReXDataset('test_file.plt')
         
         assert ds._yt_ds == self.mock_yt_ds
-        assert ds._all_data == self.mock_all_data
+        assert ds._all_data[0] == self.mock_all_data
         yt_mock.load.assert_called_once_with('test_file.plt')
     
     def test_build_coordinates(self):
@@ -66,9 +68,11 @@ class TestAMReXDataset:
         assert 'y_range' in ds.coords
         assert 'z_range' in ds.coords
         
-        # Check levels and time
+        # Check levels
         assert ds.coords['levels'] == [0, 1, 2]
-        assert ds.coords['time'] == 1.5
+        
+        # Check time (single file)
+        assert 'time' not in ds.coords
     
     def test_build_data_vars(self):
         """Test data variable building"""
@@ -91,7 +95,7 @@ class TestAMReXDataset:
         
         assert attrs['max_level'] == 2
         assert attrs['dimensionality'] == 3
-        assert attrs['current_time'] == 1.5
+        assert attrs['times'] == [1.5]
         assert 'parameters' in attrs
     
     def test_levels_property(self):
@@ -131,6 +135,7 @@ class TestAMReXDataArray:
         self.mock_ds.data_vars = {'temperature': ('amrex', 'temperature')}
         self.mock_ds._yt_ds = Mock()
         self.mock_ds._yt_ds.dimensionality = 3
+        self.mock_ds._times = [1.5]
         self.mock_ds.dims = ['z', 'y', 'x']
         self.mock_ds.coords = {
             'x_range': (0.0, 100.0),
@@ -223,15 +228,16 @@ class TestAMReXCalculations:
     def setup_method(self):
         """Set up test fixtures"""
         # Create a mock dataset
-        self.mock_ds = Mock()
+        self.mock_ds = MagicMock()
         self.mock_ds.data_vars = {
             'temperature': ('amrex', 'temperature'),
             'x_velocity': ('amrex', 'x_velocity'),
             'y_velocity': ('amrex', 'y_velocity')
         }
-        self.mock_ds._yt_ds = Mock()
+        self.mock_ds._yt_ds = MagicMock()
         self.mock_ds._yt_ds.derived_field_list = []
         self.mock_ds._yt_ds.add_field = Mock()
+        self.mock_ds._yt_ds.add_gradient_fields = Mock()
         
         self.calc = AMReXCalculations(self.mock_ds)
     
@@ -248,21 +254,26 @@ class TestAMReXCalculations:
         """Test gradient calculation for new field"""
         result = self.calc.gradient('temperature', 'x')
         
-        # Check that add_field was called
-        self.mock_ds._yt_ds.add_field.assert_called_once()
+        # Check that add_gradient_fields was called
+        self.mock_ds._yt_ds.add_gradient_fields.assert_called_once_with(('amrex', 'temperature'))
         
         # Check that the field was added to data_vars
-        assert 'gradient_temperature_x' in self.mock_ds.data_vars
+        assert 'temperature_gradient_x' in self.mock_ds.data_vars
         
         # Check return type
         assert isinstance(result, AMReXDataArray)
-        assert result.field_name == 'gradient_temperature_x'
+        assert result.field_name == 'temperature_gradient_x'
     
     def test_divergence(self):
         """Test divergence calculation"""
+        self.mock_ds._yt_ds.dimensionality = 2
         result = self.calc.divergence('x_velocity', 'y_velocity')
         
-        # Check that add_field was called
+        # Check that add_gradient_fields was called for both velocity components
+        self.mock_ds._yt_ds.add_gradient_fields.assert_any_call(('amrex', 'x_velocity'))
+        self.mock_ds._yt_ds.add_gradient_fields.assert_any_call(('amrex', 'y_velocity'))
+        
+        # Check that add_field was called for the divergence field itself
         self.mock_ds._yt_ds.add_field.assert_called_once()
         
         # Check that the field was added to data_vars
@@ -276,7 +287,11 @@ class TestAMReXCalculations:
         """Test vorticity calculation"""
         result = self.calc.vorticity('x_velocity', 'y_velocity')
         
-        # Check that add_field was called
+        # Check that add_gradient_fields was called for both velocity components
+        self.mock_ds._yt_ds.add_gradient_fields.assert_any_call(('amrex', 'x_velocity'))
+        self.mock_ds._yt_ds.add_gradient_fields.assert_any_call(('amrex', 'y_velocity'))
+
+        # Check that add_field was called for the vorticity field itself
         self.mock_ds._yt_ds.add_field.assert_called_once()
         
         # Check that the field was added to data_vars
@@ -293,7 +308,10 @@ class TestUtils:
     def setup_method(self):
         """Set up test fixtures"""
         # Mock yt.load
-        yt_mock.load.return_value = Mock()
+        mock_ds = MagicMock()
+        mock_ds.current_time = 1.5
+        mock_ds.covering_grid.return_value.__getitem__.return_value = np.zeros(64)
+        yt_mock.load.return_value = mock_ds
     
     def test_open_amrex(self):
         """Test open_amrex function"""
