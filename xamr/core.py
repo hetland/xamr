@@ -400,7 +400,13 @@ class AMReXCalculations:
     
     def __init__(self, dataset):
         self.ds = dataset
-    
+
+    def _add_derived_field_to_all_timesteps(self, field_name_tuple, function, **kwargs):
+        """Helper to add a derived field to all yt datasets in a time series."""
+        for yt_ds in self.ds._yt_datasets:
+            if field_name_tuple not in yt_ds.derived_field_list:
+                yt_ds.add_field(field_name_tuple, function=function, **kwargs)
+
     def gradient(self, field: str, dim: str) -> AMReXDataArray:
         """Calculate gradient across all AMR levels using yt"""
         if dim not in ['x', 'y', 'z']:
@@ -412,7 +418,8 @@ class AMReXCalculations:
         
         # This will create all gradient fields for the given field
         # It's idempotent, so it's safe to call multiple times.
-        self.ds._yt_ds.add_gradient_fields(field_tuple)
+        for yt_ds in self.ds._yt_datasets:
+            yt_ds.add_gradient_fields(field_tuple)
         
         # Add to data_vars if not already there
         if grad_field_name not in self.ds.data_vars:
@@ -425,35 +432,35 @@ class AMReXCalculations:
         div_field_name = "divergence"
         div_field_tuple = ("amrex", div_field_name)
 
-        if div_field_tuple not in self.ds._yt_ds.derived_field_list:
-            
-            u_field_tuple = self.ds.data_vars[u_field]
-            v_field_tuple = self.ds.data_vars[v_field]
-            
-            # Ensure gradient fields exist
-            self.ds._yt_ds.add_gradient_fields(u_field_tuple)
-            self.ds._yt_ds.add_gradient_fields(v_field_tuple)
-            
-            u_grad_x_tuple = (u_field_tuple[0], f"{u_field}_gradient_x")
-            v_grad_y_tuple = (v_field_tuple[0], f"{v_field}_gradient_y")
+        u_field_tuple = self.ds.data_vars[u_field]
+        v_field_tuple = self.ds.data_vars[v_field]
+        
+        # Ensure gradient fields exist for all timesteps
+        for yt_ds in self.ds._yt_datasets:
+            yt_ds.add_gradient_fields(u_field_tuple)
+            yt_ds.add_gradient_fields(v_field_tuple)
+        
+        u_grad_x_tuple = (u_field_tuple[0], f"{u_field}_gradient_x")
+        v_grad_y_tuple = (v_field_tuple[0], f"{v_field}_gradient_y")
 
-            def _divergence_function(field, data):
-                div = data[u_grad_x_tuple] + data[v_grad_y_tuple]
-                
-                if w_field and self.ds._yt_ds.dimensionality == 3:
-                    w_field_tuple = self.ds.data_vars[w_field]
-                    self.ds._yt_ds.add_gradient_fields(w_field_tuple)
-                    w_grad_z_tuple = (w_field_tuple[0], f"{w_field}_gradient_z")
-                    div += data[w_grad_z_tuple]
-                
-                return div
+        def _divergence_function(field, data):
+            div = data[u_grad_x_tuple] + data[v_grad_y_tuple]
             
-            self.ds._yt_ds.add_field(
-                div_field_tuple,
-                function=_divergence_function,
-                sampling_type="cell",
-                units="auto"
-            )
+            if w_field and self.ds._yt_ds.dimensionality == 3:
+                w_field_tuple = self.ds.data_vars[w_field]
+                for yt_ds in self.ds._yt_datasets:
+                    yt_ds.add_gradient_fields(w_field_tuple)
+                w_grad_z_tuple = (w_field_tuple[0], f"{w_field}_gradient_z")
+                div += data[w_grad_z_tuple]
+            
+            return div
+        
+        self._add_derived_field_to_all_timesteps(
+            div_field_tuple,
+            function=_divergence_function,
+            sampling_type="cell",
+            units="auto"
+        )
         
         if div_field_name not in self.ds.data_vars:
             self.ds.data_vars[div_field_name] = div_field_tuple
@@ -465,27 +472,26 @@ class AMReXCalculations:
         vort_field_name = "vorticity_z"
         vort_field_tuple = ("amrex", vort_field_name)
         
-        if vort_field_tuple not in self.ds._yt_ds.derived_field_list:
-            
-            u_field_tuple = self.ds.data_vars[u_field]
-            v_field_tuple = self.ds.data_vars[v_field]
+        u_field_tuple = self.ds.data_vars[u_field]
+        v_field_tuple = self.ds.data_vars[v_field]
 
-            # Ensure gradient fields exist
-            self.ds._yt_ds.add_gradient_fields(u_field_tuple)
-            self.ds._yt_ds.add_gradient_fields(v_field_tuple)
+        # Ensure gradient fields exist for all timesteps
+        for yt_ds in self.ds._yt_datasets:
+            yt_ds.add_gradient_fields(u_field_tuple)
+            yt_ds.add_gradient_fields(v_field_tuple)
 
-            u_grad_y_tuple = (u_field_tuple[0], f"{u_field}_gradient_y")
-            v_grad_x_tuple = (v_field_tuple[0], f"{v_field}_gradient_x")
+        u_grad_y_tuple = (u_field_tuple[0], f"{u_field}_gradient_y")
+        v_grad_x_tuple = (v_field_tuple[0], f"{v_field}_gradient_x")
 
-            def _vorticity_function(field, data):
-                return data[v_grad_x_tuple] - data[u_grad_y_tuple]
-            
-            self.ds._yt_ds.add_field(
-                vort_field_tuple,
-                function=_vorticity_function,
-                sampling_type="cell",
-                units="auto"
-            )
+        def _vorticity_function(field, data):
+            return data[v_grad_x_tuple] - data[u_grad_y_tuple]
+        
+        self._add_derived_field_to_all_timesteps(
+            vort_field_tuple,
+            function=_vorticity_function,
+            sampling_type="cell",
+            units="auto"
+        )
         
         if vort_field_name not in self.ds.data_vars:
             self.ds.data_vars[vort_field_name] = vort_field_tuple

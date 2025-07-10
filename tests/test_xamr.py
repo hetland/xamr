@@ -234,10 +234,9 @@ class TestAMReXCalculations:
             'x_velocity': ('amrex', 'x_velocity'),
             'y_velocity': ('amrex', 'y_velocity')
         }
-        self.mock_ds._yt_ds = MagicMock()
-        self.mock_ds._yt_ds.derived_field_list = []
-        self.mock_ds._yt_ds.add_field = Mock()
-        self.mock_ds._yt_ds.add_gradient_fields = Mock()
+        self.mock_yt_ds = MagicMock()
+        self.mock_yt_ds.derived_field_list = []
+        self.mock_ds._yt_datasets = [self.mock_yt_ds]  # Mock the list of datasets
         
         self.calc = AMReXCalculations(self.mock_ds)
     
@@ -255,7 +254,7 @@ class TestAMReXCalculations:
         result = self.calc.gradient('temperature', 'x')
         
         # Check that add_gradient_fields was called
-        self.mock_ds._yt_ds.add_gradient_fields.assert_called_once_with(('amrex', 'temperature'))
+        self.mock_yt_ds.add_gradient_fields.assert_called_once_with(('amrex', 'temperature'))
         
         # Check that the field was added to data_vars
         assert 'temperature_gradient_x' in self.mock_ds.data_vars
@@ -270,11 +269,11 @@ class TestAMReXCalculations:
         result = self.calc.divergence('x_velocity', 'y_velocity')
         
         # Check that add_gradient_fields was called for both velocity components
-        self.mock_ds._yt_ds.add_gradient_fields.assert_any_call(('amrex', 'x_velocity'))
-        self.mock_ds._yt_ds.add_gradient_fields.assert_any_call(('amrex', 'y_velocity'))
+        self.mock_yt_ds.add_gradient_fields.assert_any_call(('amrex', 'x_velocity'))
+        self.mock_yt_ds.add_gradient_fields.assert_any_call(('amrex', 'y_velocity'))
         
         # Check that add_field was called for the divergence field itself
-        self.mock_ds._yt_ds.add_field.assert_called_once()
+        self.mock_yt_ds.add_field.assert_called_once()
         
         # Check that the field was added to data_vars
         assert 'divergence' in self.mock_ds.data_vars
@@ -288,11 +287,11 @@ class TestAMReXCalculations:
         result = self.calc.vorticity('x_velocity', 'y_velocity')
         
         # Check that add_gradient_fields was called for both velocity components
-        self.mock_ds._yt_ds.add_gradient_fields.assert_any_call(('amrex', 'x_velocity'))
-        self.mock_ds._yt_ds.add_gradient_fields.assert_any_call(('amrex', 'y_velocity'))
+        self.mock_yt_ds.add_gradient_fields.assert_any_call(('amrex', 'x_velocity'))
+        self.mock_yt_ds.add_gradient_fields.assert_any_call(('amrex', 'y_velocity'))
 
         # Check that add_field was called for the vorticity field itself
-        self.mock_ds._yt_ds.add_field.assert_called_once()
+        self.mock_yt_ds.add_field.assert_called_once()
         
         # Check that the field was added to data_vars
         assert 'vorticity_z' in self.mock_ds.data_vars
