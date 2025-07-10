@@ -1,0 +1,11 @@
+# Minimal requirements for building documentation on Read the Docs
+# These packages are needed for Sphinx to generate API documentation
+# without actually importing the full dependencies
+
+sphinx>=4.0,<9.0
+sphinx-rtd-theme>=1.0
+myst-parser>=0.18,<5.0
+linkify-it-py>=1.0
+
+# For autodoc to work without importing heavy dependencies
+sphinx-autodoc-typehints>=1.12

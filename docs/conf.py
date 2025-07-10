@@ -7,6 +7,16 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('..'))
 
+# Mock imports for Read the Docs - these packages are heavy and not needed for docs
+autodoc_mock_imports = ["yt", "numpy", "matplotlib", "scipy"]
+
+# Add the package to the path
+try:
+    import xamr
+except ImportError:
+    # If xamr can't be imported, that's ok for docs building
+    pass
+
 project = 'xamr'
 copyright = '2025, xamr developers'
 author = 'xamr developers'
