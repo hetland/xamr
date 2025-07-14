@@ -254,8 +254,28 @@ class AMReXDataArray:
         self._coarsest_data = []
         
         for coarsest_grid in self.parent._coarsest_grids:
-            field_data = np.array(coarsest_grid[self._field_tuple])
-            self._coarsest_data.append(field_data)
+            try:
+                field_data = np.array(coarsest_grid[self._field_tuple])
+                self._coarsest_data.append(field_data)
+            except KeyError:
+                # Field might be a derived field, try to access from the full dataset
+                try:
+                    # Get the corresponding yt dataset for this time step
+                    yt_ds_idx = self.parent._coarsest_grids.index(coarsest_grid)
+                    yt_ds = self.parent._yt_datasets[yt_ds_idx]
+                    
+                    # Create a fresh covering grid from the yt dataset
+                    fresh_grid = yt_ds.covering_grid(
+                        level=0,
+                        left_edge=yt_ds.domain_left_edge,
+                        dims=yt_ds.domain_dimensions
+                    )
+                    field_data = np.array(fresh_grid[self._field_tuple])
+                    self._coarsest_data.append(field_data)
+                except (KeyError, ValueError) as e:
+                    raise KeyError(f"Field '{self._field_tuple}' not found in dataset. "
+                                 f"Make sure the field exists or has been properly calculated. "
+                                 f"Original error: {e}")
 
     @property
     def data(self):
@@ -381,13 +401,18 @@ class AMReXDataArray:
             # Extract data at specified level for all time steps
             result = []
             for yt_ds in self.parent._yt_datasets:
-                level_data = yt_ds.covering_grid(
-                    level=level,
-                    left_edge=yt_ds.domain_left_edge,
-                    dims=yt_ds.domain_dimensions * yt_ds.refine_by**level
-                )
-                field_values = level_data[self._field_tuple]
-                result.append(np.array(field_values))
+                try:
+                    level_data = yt_ds.covering_grid(
+                        level=level,
+                        left_edge=yt_ds.domain_left_edge,
+                        dims=yt_ds.domain_dimensions * yt_ds.refine_by**level
+                    )
+                    field_values = level_data[self._field_tuple]
+                    result.append(np.array(field_values))
+                except KeyError as e:
+                    raise KeyError(f"Field '{self._field_tuple}' not found at level {level}. "
+                                 f"Make sure the field exists or has been properly calculated. "
+                                 f"Original error: {e}")
             
             if len(self.parent._times) > 1:
                 return np.array(result)
@@ -416,9 +441,9 @@ class AMReXCalculations:
         grad_field_name = f"{field}_gradient_{dim}"
         grad_field_tuple = (field_tuple[0], grad_field_name)
         
-        # This will create all gradient fields for the given field
-        # It's idempotent, so it's safe to call multiple times.
+        # Add gradient fields to all timesteps
         for yt_ds in self.ds._yt_datasets:
+            # yt's add_gradient_fields creates multiple gradient fields at once
             yt_ds.add_gradient_fields(field_tuple)
         
         # Add to data_vars if not already there
