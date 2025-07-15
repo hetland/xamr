@@ -84,11 +84,13 @@ class AMReXDataset:
         self._coarsest_grids = []
         
         for yt_ds in self._yt_datasets:
-            # Create covering grid at level 0 (coarsest)
+            # Create covering grid at level 0 (coarsest) with ghost zones for gradient calculations
+            # Ghost zones are needed for derived fields like gradients and are generally safe to include
             coarsest_grid = yt_ds.covering_grid(
                 level=0,
                 left_edge=yt_ds.domain_left_edge,
-                dims=yt_ds.domain_dimensions
+                dims=yt_ds.domain_dimensions,
+                num_ghost_zones=1  # Add ghost zones for gradient calculations
             )
             self._coarsest_grids.append(coarsest_grid)
     
@@ -264,11 +266,12 @@ class AMReXDataArray:
                     yt_ds_idx = self.parent._coarsest_grids.index(coarsest_grid)
                     yt_ds = self.parent._yt_datasets[yt_ds_idx]
                     
-                    # Create a fresh covering grid from the yt dataset
+                    # Create a fresh covering grid from the yt dataset with ghost zones
                     fresh_grid = yt_ds.covering_grid(
                         level=0,
                         left_edge=yt_ds.domain_left_edge,
-                        dims=yt_ds.domain_dimensions
+                        dims=yt_ds.domain_dimensions,
+                        num_ghost_zones=1  # Add ghost zones for derived fields
                     )
                     field_data = np.array(fresh_grid[self._field_tuple])
                     self._coarsest_data.append(field_data)
@@ -405,7 +408,8 @@ class AMReXDataArray:
                     level_data = yt_ds.covering_grid(
                         level=level,
                         left_edge=yt_ds.domain_left_edge,
-                        dims=yt_ds.domain_dimensions * yt_ds.refine_by**level
+                        dims=yt_ds.domain_dimensions * yt_ds.refine_by**level,
+                        num_ghost_zones=1  # Add ghost zones for derived fields
                     )
                     field_values = level_data[self._field_tuple]
                     result.append(np.array(field_values))
@@ -455,7 +459,7 @@ class AMReXCalculations:
     def divergence(self, u_field: str, v_field: str, w_field: str = None):
         """Calculate divergence across all AMR levels"""
         div_field_name = "divergence"
-        div_field_tuple = ("amrex", div_field_name)
+        div_field_tuple = ("boxlib", div_field_name)
 
         u_field_tuple = self.ds.data_vars[u_field]
         v_field_tuple = self.ds.data_vars[v_field]
@@ -495,7 +499,7 @@ class AMReXCalculations:
     def vorticity(self, u_field: str, v_field: str):
         """Calculate vertical vorticity across all AMR levels"""
         vort_field_name = "vorticity_z"
-        vort_field_tuple = ("amrex", vort_field_name)
+        vort_field_tuple = ("boxlib", vort_field_name)
         
         u_field_tuple = self.ds.data_vars[u_field]
         v_field_tuple = self.ds.data_vars[v_field]
