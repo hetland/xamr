@@ -11,15 +11,11 @@ import os
 # Add the parent directory to the path so we can import xamr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Mock yt before importing xamr
-yt_mock = Mock()
-yt_mock.load = Mock()
-sys.modules['yt'] = yt_mock
-
 from xamr.core import AMReXDataset, AMReXDataArray, AMReXCalculations
 from xamr.utils import open_amrex
 
 
+@patch('xamr.core.yt.load')
 class TestAMReXDataset:
     """Test cases for AMReXDataset class"""
     
@@ -44,20 +40,20 @@ class TestAMReXDataset:
         # Mock all_data method
         self.mock_all_data = MagicMock()
         self.mock_yt_ds.all_data.return_value = self.mock_all_data
-        
-        # Mock yt.load
-        yt_mock.load.return_value = self.mock_yt_ds
     
-    def test_init(self):
+    def test_init(self, mock_yt_load):
         """Test AMReXDataset initialization"""
+        mock_yt_load.return_value = self.mock_yt_ds
+        
         ds = AMReXDataset('test_file.plt')
         
         assert ds._yt_ds == self.mock_yt_ds
         assert ds._all_data[0] == self.mock_all_data
-        yt_mock.load.assert_called_once_with('test_file.plt')
+        mock_yt_load.assert_called_once_with('test_file.plt')
     
-    def test_build_coordinates(self):
+    def test_build_coordinates(self, mock_yt_load):
         """Test coordinate building"""
+        mock_yt_load.return_value = self.mock_yt_ds
         ds = AMReXDataset('test_file.plt')
         
         # Check dims
@@ -74,8 +70,9 @@ class TestAMReXDataset:
         # Check time (single file)
         assert 'time' not in ds.coords
     
-    def test_build_data_vars(self):
+    def test_build_data_vars(self, mock_yt_load):
         """Test data variable building"""
+        mock_yt_load.return_value = self.mock_yt_ds
         ds = AMReXDataset('test_file.plt')
         
         # Check AMReX fields
@@ -88,8 +85,9 @@ class TestAMReXDataset:
         assert 'y' in ds.data_vars
         assert 'z' in ds.data_vars
     
-    def test_attrs_property(self):
+    def test_attrs_property(self, mock_yt_load):
         """Test attrs property"""
+        mock_yt_load.return_value = self.mock_yt_ds
         ds = AMReXDataset('test_file.plt')
         attrs = ds.attrs
         
@@ -98,13 +96,15 @@ class TestAMReXDataset:
         assert attrs['times'] == [1.5]
         assert 'parameters' in attrs
     
-    def test_levels_property(self):
+    def test_levels_property(self, mock_yt_load):
         """Test levels property"""
+        mock_yt_load.return_value = self.mock_yt_ds
         ds = AMReXDataset('test_file.plt')
         assert ds.levels == [0, 1, 2]
     
-    def test_getitem(self):
+    def test_getitem(self, mock_yt_load):
         """Test field access via __getitem__"""
+        mock_yt_load.return_value = self.mock_yt_ds
         ds = AMReXDataset('test_file.plt')
         
         # Test valid field
@@ -116,8 +116,9 @@ class TestAMReXDataset:
         with pytest.raises(KeyError):
             ds['invalid_field']
     
-    def test_calc_property(self):
+    def test_calc_property(self, mock_yt_load):
         """Test calc property"""
+        mock_yt_load.return_value = self.mock_yt_ds
         ds = AMReXDataset('test_file.plt')
         calc = ds.calc
         
@@ -301,23 +302,24 @@ class TestAMReXCalculations:
         assert result.field_name == 'vorticity_z'
 
 
+@patch('xamr.core.yt.load')
 class TestUtils:
     """Test cases for utility functions"""
     
     def setup_method(self):
         """Set up test fixtures"""
         # Mock yt.load
-        mock_ds = MagicMock()
-        mock_ds.current_time = 1.5
-        mock_ds.covering_grid.return_value.__getitem__.return_value = np.zeros(64)
-        yt_mock.load.return_value = mock_ds
+        self.mock_ds = MagicMock()
+        self.mock_ds.current_time = 1.5
+        self.mock_ds.covering_grid.return_value.__getitem__.return_value = np.zeros(64)
     
-    def test_open_amrex(self):
+    def test_open_amrex(self, mock_yt_load):
         """Test open_amrex function"""
+        mock_yt_load.return_value = self.mock_ds
         ds = open_amrex('test_file.plt')
         
         assert isinstance(ds, AMReXDataset)
-        yt_mock.load.assert_called_with('test_file.plt')
+        mock_yt_load.assert_called_with('test_file.plt')
 
 
 if __name__ == '__main__':

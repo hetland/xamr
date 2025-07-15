@@ -37,7 +37,10 @@ jobs:
     
     - name: Test with pytest
       run: |
-        pytest --cov=xamr --cov-report=xml
+        # Run unit tests with coverage
+        pytest tests/test_xamr.py --cov=xamr --cov-report=xml -v
+        # Run integration tests with real data
+        pytest tests/test_integration.py -v -m integration --tb=short
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3

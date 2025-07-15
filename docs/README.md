@@ -20,9 +20,11 @@ make html
 ## Documentation structure
 
 - `index.rst` - Main documentation index
+- `quick_start.md` - **Quick Start Guide** - comprehensive tutorial for new users
 - `api.rst` - API reference
 - `examples.rst` - Usage examples
 - `installation.rst` - Installation instructions
+- `testing.md` - Testing guide for developers
 
 ## Contributing to documentation
 

@@ -34,6 +34,8 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
+For a comprehensive tutorial, see the **[Quick Start Guide](docs/quick_start.md)** or try the interactive **[Jupyter notebook](XAMR_Quick_Start_Guide.ipynb)**.
+
 ```python
 import xamr
 

@@ -189,7 +189,8 @@ class AMReXDataArray:
         self.parent = parent_ds
         self.field_name = field_name
         self._field_tuple = parent_ds.data_vars[field_name]
-        self._selection_obj = selection_obj or parent_ds._all_data
+        # For the default selection_obj, use the first all_data object for single access
+        self._selection_obj = selection_obj or parent_ds._all_data[0]
         self._data = None  # Lazy loading
         self._coarsest_data = None  # Cached coarsest level data
     
