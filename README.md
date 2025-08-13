@@ -1,4 +1,18 @@
-# xamr: xarray-like interface for AMReX data
+
+# DEPRECATED
+
+This package was an experiment in trying to access amrex data files in a way that is consistent with xarray. This package wrapped yt functions that converted to xarray variables, and provided basic gradient calculations. In the end, this approach seemed slow and hard to extend to better workflows. 
+
+A new approach, to provide a backend to xarray that can read amrex files, seems more promising. You can find the package here: [xamrex](https://github.com/hetland/xamrex)
+
+
+
+
+
+
+
+
+## xamr: xarray-like interface for AMReX data wrapping yt
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
